@@ -1,34 +1,27 @@
 import { useState, useEffect, useRef } from "react";
 
-const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
-const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+const API_KEY = import.meta.env.VITE_GROQ_API_KEY;
+const MODEL = "llama-3.3-70b-versatile";
 
-const callClaude = async (messages, system) => {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+const callAI = async (messages, system) => {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${API_KEY}`,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
+      model: MODEL,
       max_tokens: 1000,
-      system,
-      messages,
+      messages: [
+        { role: "system", content: system },
+        ...messages,
+      ],
     }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
-  return data.content?.map((b) => b.text || "").join("") || "";
-};
-
-const t = {
-  bg: "#0a0a0f", surface: "#12121a", surfaceHover: "#1a1a26",
-  border: "#1e1e2e", accent: "#7c6af7", accentGlow: "#7c6af740",
-  gold: "#f5c842", goldSoft: "#f5c84220", green: "#4ade80",
-  greenSoft: "#4ade8020", text: "#e8e8f0", textMuted: "#6b6b8a", textDim: "#3a3a55",
+  return data.choices?.[0]?.message?.content || "";
 };
 
 const GOAL_COLORS = ["#7c6af7","#f5c842","#4ade80","#f87171","#60a5fa","#fb923c","#e879f9"];
@@ -177,7 +170,7 @@ export default function App() {
     const system = `You are LifeForge, an empathetic, sharp, no-fluff AI life coach.\nCurrent goals:\n${goalSummary}\nToday: ${doneCount}/${tasks.length} tasks done.\nStyle: warm but direct, concrete advice, under 120 words unless asked.`;
     const history = messages.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
     try {
-      const text = await callClaude([...history, { role: "user", content: userMsg }], system);
+      const text = await callAI([...history, { role: "user", content: userMsg }], system);
       setMessages(prev => [...prev, { role: "ai", text }]);
     } catch (e) {
       setMessages(prev => [...prev, { role: "ai", text: `Error: ${e.message}` }]);
@@ -199,7 +192,7 @@ export default function App() {
       if (!name.trim()) return;
       setGenerating(true);
       try {
-        const raw = await callClaude([{ role: "user", content: `Generate exactly 2-3 specific daily tasks for goal: "${name}". Category: ${category}. Context: ${details || "none"}. Respond ONLY with a JSON array of strings, no other text.` }], "");
+        const raw = await callAI([{ role: "user", content: `Generate exactly 2-3 specific daily tasks for goal: "${name}". Category: ${category}. Context: ${details || "none"}. Respond ONLY with a JSON array of strings, no other text. Example: ["Task one", "Task two"]` }], "You are a helpful assistant that only responds with valid JSON arrays.");
         const clean = raw.replace(/```json|```/g, "").trim();
         setGeneratedTasks(JSON.parse(clean));
       } catch { setGeneratedTasks(["Daily practice session", "Track your progress"]); }
@@ -372,7 +365,7 @@ export default function App() {
 
             {page==="coach" && (
               <div className="card" style={{flex:1,display:"flex",flexDirection:"column"}}>
-                <div className="card-title">AI Coach — Powered by Claude</div>
+                <div className="card-title">AI Coach — Powered by Groq</div>
                 <div className="chat-area" ref={chatRef}>
                   {messages.map((m,i) => (
                     <div key={i} className={`msg ${m.role}`}>
