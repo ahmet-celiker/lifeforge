@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
+const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 
 const callClaude = async (messages, system) => {
