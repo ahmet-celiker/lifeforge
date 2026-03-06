@@ -498,6 +498,217 @@ function GamePage() {
   );
 }
 
+// ── SİNEK VUR ──────────────────────────────────────────────────────────────
+const FLY_MSGS_HIT = ["YUCK! 🤢","EZİLDİ! 💀","GOTCHA! 😈","BUZ! 🪰","SÜPER! 🤮","GİT ORDAN! 👋","PATLADI! 💥","REZALET! 😤"];
+const FLY_MSGS_MISS = ["KAÇTI! 😤","BECEREMEDÎN! 🤡","HAHAha 🪰","NEREYE BASTIN?! 😂","EL SALLIYOR 👋","TUTAMADIN! 😭","ŞANS YOK! 🎪"];
+const FLY_FACES = ["🪰","🦟","🐛","🐜","🦗"];
+
+function FlyPage() {
+  const [flies, setFlies] = useState([]);
+  const [score, setScore] = useState(0);
+  const [missed, setMissed] = useState(0);
+  const [msg, setMsg] = useState("");
+  const [msgPos, setMsgPos] = useState({x:50,y:50});
+  const [msgColor, setMsgColor] = useState("#4ade80");
+  const [gameActive, setGameActive] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(30);
+  const [highScore, setHighScore] = useState(()=>parseInt(localStorage.getItem("gl_fly_hs")||"0"));
+  const [gameOver, setGameOver] = useState(false);
+  const [splats, setSplats] = useState([]);
+  const areaRef = useRef(null);
+  const flyIdRef = useRef(0);
+  const timerRef = useRef(null);
+  const spawnRef = useRef(null);
+
+  const showMsg = (text, x, y, hit) => {
+    setMsg(text); setMsgPos({x,y}); setMsgColor(hit?"#4ade80":"#f87171");
+    setTimeout(()=>setMsg(""), 700);
+  };
+
+  const spawnFly = useCallback(()=>{
+    if(!areaRef.current) return;
+    const area = areaRef.current.getBoundingClientRect();
+    const id = ++flyIdRef.current;
+    const emoji = FLY_FACES[Math.floor(Math.random()*FLY_FACES.length)];
+    const x = 5 + Math.random()*85;
+    const y = 5 + Math.random()*85;
+    const speed = 0.3 + Math.random()*0.8;
+    const dx = (Math.random()-0.5)*speed;
+    const dy = (Math.random()-0.5)*speed;
+    const size = 28 + Math.random()*20;
+    const life = 2500 + Math.random()*2000;
+    setFlies(prev=>[...prev, {id, emoji, x, y, dx, dy, size, rotation:Math.random()*360}]);
+    setTimeout(()=>{
+      setFlies(prev=>prev.filter(f=>f.id!==id));
+    }, life);
+  },[]);
+
+  const startGame = () => {
+    setFlies([]); setSplats([]); setScore(0); setMissed(0);
+    setTimeLeft(30); setGameOver(false); setGameActive(true);
+    spawnRef.current = setInterval(spawnFly, 600);
+    timerRef.current = setInterval(()=>{
+      setTimeLeft(t=>{
+        if(t<=1){
+          clearInterval(spawnRef.current);
+          clearInterval(timerRef.current);
+          setGameActive(false);
+          setGameOver(true);
+          setFlies([]);
+          return 0;
+        }
+        return t-1;
+      });
+    },1000);
+  };
+
+  useEffect(()=>{
+    if(gameOver){
+      setScore(s=>{ if(s>highScore){setHighScore(s);localStorage.setItem("gl_fly_hs",s);} return s; });
+    }
+  },[gameOver]);
+
+  useEffect(()=>{
+    if(!gameActive) return;
+    const move = setInterval(()=>{
+      setFlies(prev=>prev.map(f=>{
+        let nx = f.x + f.dx;
+        let ny = f.y + f.dy;
+        let ndx = f.dx; let ndy = f.dy;
+        if(nx<2||nx>93){ndx*=-1; nx=Math.max(2,Math.min(93,nx));}
+        if(ny<2||ny>90){ndy*=-1; ny=Math.max(2,Math.min(90,ny));}
+        return {...f, x:nx, y:ny, dx:ndx, dy:ndy, rotation:f.rotation+5};
+      }));
+    },50);
+    return ()=>clearInterval(move);
+  },[gameActive]);
+
+  useEffect(()=>()=>{ clearInterval(spawnRef.current); clearInterval(timerRef.current); },[]);
+
+  const hitFly = (e, id, fx, fy) => {
+    e.stopPropagation();
+    const m = FLY_MSGS_HIT[Math.floor(Math.random()*FLY_MSGS_HIT.length)];
+    showMsg(m, fx, fy, true);
+    setFlies(prev=>prev.filter(f=>f.id!==id));
+    setScore(s=>s+10);
+    const sid = Date.now();
+    setSplats(prev=>[...prev,{id:sid, x:fx, y:fy}]);
+    setTimeout(()=>setSplats(prev=>prev.filter(s=>s.id!==sid)),3000);
+  };
+
+  const missClick = (e) => {
+    if(!gameActive) return;
+    const rect = areaRef.current.getBoundingClientRect();
+    const px = ((e.clientX-rect.left)/rect.width)*100;
+    const py = ((e.clientY-rect.top)/rect.height)*100;
+    const m = FLY_MSGS_MISS[Math.floor(Math.random()*FLY_MSGS_MISS.length)];
+    showMsg(m, px, py, false);
+    setMissed(m=>m+1);
+  };
+
+  const accuracy = score+missed*10 > 0 ? Math.round((score/(score+missed*10))*100) : 0;
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16,animation:"fadeIn 0.4s ease"}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontSize:22,fontWeight:900,color:"var(--text)"}}>sinek<span style={{color:"#4ade80"}}>.</span>vur</div>
+        <div style={{display:"flex",gap:8}}>
+          <div className="score-chip">Skor<span>{score}</span></div>
+          <div className="score-chip">Rekor<span>{highScore}</span></div>
+          <div className="score-chip" style={{color:timeLeft<=10?"#f87171":"var(--muted)"}}>Süre<span style={{color:timeLeft<=10?"#f87171":"var(--text)"}}>{timeLeft}s</span></div>
+        </div>
+      </div>
+
+      {/* Game area */}
+      <div ref={areaRef} onClick={missClick} style={{
+        position:"relative", width:"100%", paddingBottom:"85%",
+        background:"linear-gradient(135deg,#0f1a0f,#0a140a)",
+        border:"2px solid #4ade8030", borderRadius:20,
+        overflow:"hidden", cursor:"crosshair",
+        boxShadow:"0 0 30px #00000060"
+      }}>
+        {/* Splats */}
+        {splats.map(s=>(
+          <div key={s.id} style={{position:"absolute",left:`${s.x}%`,top:`${s.y}%`,fontSize:20,transform:"translate(-50%,-50%)",opacity:0.4,pointerEvents:"none",filter:"blur(1px)"}}>💥</div>
+        ))}
+
+        {/* Flies */}
+        {flies.map(f=>(
+          <div key={f.id} onClick={(e)=>hitFly(e,f.id,f.x,f.y)}
+            style={{
+              position:"absolute", left:`${f.x}%`, top:`${f.y}%`,
+              fontSize:f.size, transform:`translate(-50%,-50%) rotate(${f.rotation}deg)`,
+              cursor:"pointer", userSelect:"none", transition:"left 0.05s, top 0.05s",
+              filter:"drop-shadow(0 0 4px #00ff0060)",
+              zIndex:10,
+            }}>
+            {f.emoji}
+          </div>
+        ))}
+
+        {/* Floating message */}
+        {msg && (
+          <div style={{
+            position:"absolute", left:`${msgPos.x}%`, top:`${msgPos.y}%`,
+            transform:"translate(-50%,-50%)", color:msgColor,
+            fontWeight:900, fontSize:16, fontFamily:"'Nunito',sans-serif",
+            pointerEvents:"none", zIndex:20, whiteSpace:"nowrap",
+            textShadow:`0 0 10px ${msgColor}`,
+            animation:"fadeIn 0.1s ease",
+          }}>{msg}</div>
+        )}
+
+        {/* Overlay — idle/gameover */}
+        {!gameActive && (
+          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#0a140aee",gap:12,zIndex:30}}>
+            {gameOver ? (
+              <>
+                <div style={{fontSize:40}}>🪰</div>
+                <div style={{fontSize:24,fontWeight:900,color:"var(--text)"}}>Bitti! 💀</div>
+                <div style={{fontSize:14,color:"var(--muted)",textAlign:"center",lineHeight:1.8}}>
+                  {score} puan — {score/10|0} sinek ezildi<br/>
+                  Kaçan: {missed} sinek 😤<br/>
+                  İsabet: %{accuracy}
+                  {score>=highScore&&score>0&&<div style={{color:"#f5c842",fontWeight:800,marginTop:4}}>🏆 YENİ REKOR!</div>}
+                </div>
+                <button className="game-start-btn" style={{background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#000"}} onClick={startGame}>🪰 Tekrar Oyna</button>
+              </>
+            ):(
+              <>
+                <div style={{fontSize:48,animation:"bounce 1s infinite"}}>🪰</div>
+                <div style={{fontSize:22,fontWeight:900,color:"var(--text)"}}>Sinek Vur!</div>
+                <div style={{fontSize:13,color:"var(--muted)",textAlign:"center",lineHeight:1.8}}>
+                  30 saniyede mümkün olduğunca<br/>
+                  fazla sineği ez! 🪰💀<br/>
+                  <span style={{fontSize:11}}>Kaçırırsan onlar güler 😂</span>
+                </div>
+                <button className="game-start-btn" style={{background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#000"}} onClick={startGame}>🪰 Başlat!</button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Stats */}
+      {gameActive && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+          <div className="water-stat"><div className="water-stat-num" style={{color:"#4ade80"}}>{score/10|0}</div><div className="water-stat-label">sinek ezildi</div></div>
+          <div className="water-stat"><div className="water-stat-num" style={{color:"#f87171"}}>{missed}</div><div className="water-stat-label">kaçan sinek</div></div>
+          <div className="water-stat"><div className="water-stat-num" style={{color:"#f5c842"}}>{accuracy}%</div><div className="water-stat-label">isabet</div></div>
+        </div>
+      )}
+
+      {!gameActive&&!gameOver&&(
+        <div style={{textAlign:"center",fontSize:12,color:"var(--muted)",lineHeight:1.8}}>
+          🪰 Sinekler kaçar 🦟 Sivrisinekler de var<br/>
+          🐛 Tırtıl ve 🐜 karınca bonus!
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── GÖREV RULET ────────────────────────────────────────────────────────────
 function RuletPage() {
   const [spinning, setSpinning] = useState(false);
@@ -737,6 +948,7 @@ export default function App() {
           <button className={`nav-btn ${page==="rulet"?"active":""}`} onClick={()=>setPage("rulet")}>🎰 Rulet</button>
           <button className={`nav-btn ${page==="music"?"music-active":""}`} onClick={()=>setPage("music")}>🎵 Müzik</button>
           <button className={`nav-btn ${page==="game"?"game-active":""}`} onClick={()=>setPage("game")}>🎮 Oyun</button>
+          <button className={`nav-btn ${page==="fly"?"active":""}`} onClick={()=>setPage("fly")} style={page==="fly"?{background:"#4ade8020",color:"#4ade80"}:{}}>🪰 Sinek</button>
         </div>
 
         {page==="home" && (
@@ -785,6 +997,7 @@ export default function App() {
         {page==="rulet"&&<RuletPage/>}
         {page==="music"&&<MusicPage/>}
         {page==="game"&&<GamePage/>}
+        {page==="fly"&&<FlyPage/>}
       </div>
     </>
   );
