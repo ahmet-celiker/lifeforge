@@ -299,77 +299,190 @@ function WaterPage() {
   );
 }
 
-// ── BRICK BREAKER ──────────────────────────────────────────────────────────
-const CW=360,CH=480,PAD_W=70,PAD_H=10,PAD_Y=CH-30,BALL_R=8;
-const BRICK_COLS=8,BRICK_ROWS=5,BRICK_W=38,BRICK_H=14,BRICK_PAD=4;
-const BRICK_OX=(CW-(BRICK_COLS*(BRICK_W+BRICK_PAD)-BRICK_PAD))/2,BRICK_OY=30;
-const BRICK_COLORS=["#f87171","#fb923c","#f5c842","#4ade80","#38bdf8"];
-const makeBricks=()=>{const b=[];for(let r=0;r<BRICK_ROWS;r++)for(let c=0;c<BRICK_COLS;c++)b.push({r,c,alive:true,color:BRICK_COLORS[r%BRICK_COLORS.length]});return b;};
+// ── EMOJI BREAKER ──────────────────────────────────────────────────────────
+const CW=360,CH=500,PAD_W=72,PAD_H=12,PAD_Y=CH-32,BALL_R=9;
+const COLS=7,ROWS=5,BW=42,BH=36,BPAD=4;
+const BOX=(CW-(COLS*(BW+BPAD)-BPAD))/2,BOY=28;
+
+const ROW_THEMES = [
+  { emojis:["💩","🚽","🧻","💨","🪣","💩","🚽"],  pts:50,  bg:"#78350f", glow:"#f5c842" },
+  { emojis:["🦄","🌈","✨","🎀","💅","🦄","🌈"],  pts:40,  bg:"#701a75", glow:"#f0abfc" },
+  { emojis:["🍕","🍔","🌮","🍜","🧆","🍕","🍔"],  pts:30,  bg:"#7c2d12", glow:"#fb923c" },
+  { emojis:["👽","🛸","🚀","🌍","💫","👽","🛸"],  pts:20,  bg:"#0c4a6e", glow:"#38bdf8" },
+  { emojis:["🐸","🐧","🦊","🐳","🦖","🐸","🐧"], pts:10,  bg:"#14532d", glow:"#4ade80" },
+];
+
+const makeBricks = () => {
+  const b = [];
+  for (let r = 0; r < ROWS; r++) {
+    const theme = ROW_THEMES[r];
+    for (let c = 0; c < COLS; c++) {
+      b.push({ r, c, alive: true, emoji: theme.emojis[c % theme.emojis.length], pts: theme.pts, bg: theme.bg, glow: theme.glow });
+    }
+  }
+  return b;
+};
+
+const makeParticles = (x, y, glow) => Array.from({length:8},(_,i)=>({
+  x, y, vx: Math.cos(i/8*Math.PI*2)*3*(0.5+Math.random()), vy: Math.sin(i/8*Math.PI*2)*3*(0.5+Math.random()),
+  life:1, color: glow, size: 4+Math.random()*4
+}));
 
 function GamePage() {
   const canvasRef = useRef(null);
-  const stateRef = useRef({ status:"idle", padX:CW/2-PAD_W/2, ball:{x:CW/2,y:PAD_Y-BALL_R-1,vx:3,vy:-4}, bricks:makeBricks(), score:0, lives:3, highScore:parseInt(localStorage.getItem("gl_hs")||"0") });
+  const stateRef = useRef({
+    status:"idle", padX: CW/2-PAD_W/2,
+    ball: {x:CW/2, y:PAD_Y-BALL_R-2, vx:3.2, vy:-4.2},
+    bricks: makeBricks(), particles: [], floaters: [],
+    score:0, lives:3, highScore: parseInt(localStorage.getItem("gl_hs2")||"0"),
+    combo: 0, lastHit: 0,
+  });
   const animRef = useRef(null);
-  const [display, setDisplay] = useState({ status:"idle", score:0, lives:3, highScore:parseInt(localStorage.getItem("gl_hs")||"0") });
+  const [display, setDisplay] = useState({status:"idle",score:0,lives:3,highScore:parseInt(localStorage.getItem("gl_hs2")||"0"),combo:0,lastEmoji:""});
   const keysRef = useRef({});
 
-  const rr = (ctx,x,y,w,h,r) => { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r); ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r); ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r); ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r); ctx.closePath(); };
-
   const draw = useCallback(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
+    const canvas = canvasRef.current; if(!canvas) return;
     const ctx = canvas.getContext("2d"); const s = stateRef.current;
-    ctx.fillStyle="#0f0f1a"; ctx.fillRect(0,0,CW,CH);
-    ctx.strokeStyle="#ffffff05"; ctx.lineWidth=1;
-    for(let x=0;x<CW;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke();}
-    for(let y=0;y<CH;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke();}
-    s.bricks.forEach(b => { if(!b.alive)return; const x=BRICK_OX+b.c*(BRICK_W+BRICK_PAD),y=BRICK_OY+b.r*(BRICK_H+BRICK_PAD); ctx.fillStyle=b.color; ctx.shadowColor=b.color; ctx.shadowBlur=6; rr(ctx,x,y,BRICK_W,BRICK_H,4); ctx.fill(); ctx.shadowBlur=0; });
-    const g=ctx.createLinearGradient(s.padX,0,s.padX+PAD_W,0); g.addColorStop(0,"#a78bfa"); g.addColorStop(1,"#c4b5fd"); ctx.fillStyle=g; ctx.shadowColor="#a78bfa"; ctx.shadowBlur=12; rr(ctx,s.padX,PAD_Y,PAD_W,PAD_H,5); ctx.fill(); ctx.shadowBlur=0;
-    ctx.beginPath(); ctx.arc(s.ball.x,s.ball.y,BALL_R,0,Math.PI*2); ctx.fillStyle="#f0f0ff"; ctx.shadowColor="#ffffff"; ctx.shadowBlur=14; ctx.fill(); ctx.shadowBlur=0;
+    ctx.fillStyle="#0a0a14"; ctx.fillRect(0,0,CW,CH);
+    ctx.strokeStyle="#ffffff04"; ctx.lineWidth=1;
+    for(let x=0;x<CW;x+=24){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke();}
+    for(let y=0;y<CH;y+=24){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke();}
+    s.bricks.forEach(b=>{
+      if(!b.alive) return;
+      const x=BOX+b.c*(BW+BPAD), y=BOY+b.r*(BH+BPAD);
+      ctx.fillStyle=b.bg+"cc"; ctx.shadowColor=b.glow; ctx.shadowBlur=8;
+      ctx.beginPath(); ctx.roundRect(x,y,BW,BH,6); ctx.fill(); ctx.shadowBlur=0;
+      ctx.strokeStyle=b.glow+"60"; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.roundRect(x,y,BW,BH,6); ctx.stroke();
+      ctx.font=`${BH*0.55}px serif`; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.shadowBlur=0; ctx.fillStyle="#fff";
+      ctx.fillText(b.emoji, x+BW/2, y+BH/2+1);
+    });
+    s.particles.forEach(p=>{
+      ctx.globalAlpha=p.life; ctx.fillStyle=p.color;
+      ctx.shadowColor=p.color; ctx.shadowBlur=6;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0;
+    });
+    ctx.globalAlpha=1;
+    s.floaters.forEach(f=>{
+      ctx.globalAlpha=f.life;
+      ctx.font=`${20*f.life+10}px serif`; ctx.textAlign="center";
+      ctx.fillText(f.emoji, f.x, f.y);
+    });
+    ctx.globalAlpha=1;
+    const pg=ctx.createLinearGradient(s.padX,0,s.padX+PAD_W,0);
+    pg.addColorStop(0,"#a78bfa"); pg.addColorStop(0.5,"#f0abfc"); pg.addColorStop(1,"#a78bfa");
+    ctx.fillStyle=pg; ctx.shadowColor="#c4b5fd"; ctx.shadowBlur=16;
+    ctx.beginPath(); ctx.roundRect(s.padX,PAD_Y,PAD_W,PAD_H,6); ctx.fill(); ctx.shadowBlur=0;
+    ctx.beginPath(); ctx.arc(s.ball.x,s.ball.y,BALL_R,0,Math.PI*2);
+    ctx.fillStyle="#fff"; ctx.shadowColor="#ffffff"; ctx.shadowBlur=18; ctx.fill(); ctx.shadowBlur=0;
+    if(s.combo>=3){
+      ctx.font=`bold ${14+s.combo*2}px Nunito,sans-serif`; ctx.textAlign="center";
+      ctx.fillStyle=`hsl(${s.combo*30},100%,70%)`; ctx.shadowColor=`hsl(${s.combo*30},100%,70%)`; ctx.shadowBlur=10;
+      ctx.fillText(`${s.combo}x KOMBO! 🔥`, CW/2, CH-10); ctx.shadowBlur=0;
+    }
   }, []);
 
   const update = useCallback(() => {
-    const s = stateRef.current; if(s.status!=="playing")return;
-    if(keysRef.current["ArrowLeft"]||keysRef.current["a"])s.padX=Math.max(0,s.padX-6);
-    if(keysRef.current["ArrowRight"]||keysRef.current["d"])s.padX=Math.min(CW-PAD_W,s.padX+6);
+    const s = stateRef.current; if(s.status!=="playing") return;
+    const now = Date.now();
+    if(keysRef.current["ArrowLeft"]||keysRef.current["a"]) s.padX=Math.max(0,s.padX-7);
+    if(keysRef.current["ArrowRight"]||keysRef.current["d"]) s.padX=Math.min(CW-PAD_W,s.padX+7);
     s.ball.x+=s.ball.vx; s.ball.y+=s.ball.vy;
-    if(s.ball.x<=BALL_R||s.ball.x>=CW-BALL_R)s.ball.vx*=-1;
-    if(s.ball.y<=BALL_R)s.ball.vy*=-1;
-    if(s.ball.y+BALL_R>=PAD_Y&&s.ball.y-BALL_R<=PAD_Y+PAD_H&&s.ball.x>=s.padX&&s.ball.x<=s.padX+PAD_W){const hit=(s.ball.x-s.padX)/PAD_W;const angle=(hit-0.5)*2.4;const spd=Math.sqrt(s.ball.vx**2+s.ball.vy**2);s.ball.vx=spd*Math.sin(angle);s.ball.vy=-Math.abs(spd*Math.cos(angle));}
-    if(s.ball.y>CH+BALL_R){s.lives-=1;if(s.lives<=0){s.status="lost";if(s.score>s.highScore){s.highScore=s.score;localStorage.setItem("gl_hs",s.score);}setDisplay(d=>({...d,status:"lost",lives:0,score:s.score,highScore:s.highScore}));return;}s.ball={x:CW/2,y:PAD_Y-BALL_R-1,vx:3*(Math.random()>0.5?1:-1),vy:-4};setDisplay(d=>({...d,lives:s.lives}));}
-    s.bricks.forEach(b=>{if(!b.alive)return;const bx=BRICK_OX+b.c*(BRICK_W+BRICK_PAD),by=BRICK_OY+b.r*(BRICK_H+BRICK_PAD);if(s.ball.x+BALL_R>bx&&s.ball.x-BALL_R<bx+BRICK_W&&s.ball.y+BALL_R>by&&s.ball.y-BALL_R<by+BRICK_H){b.alive=false;s.score+=10;const oL=s.ball.x+BALL_R-bx,oR=bx+BRICK_W-(s.ball.x-BALL_R),oT=s.ball.y+BALL_R-by,oB=by+BRICK_H-(s.ball.y-BALL_R);if(Math.min(oL,oR)<Math.min(oT,oB))s.ball.vx*=-1;else s.ball.vy*=-1;setDisplay(d=>({...d,score:s.score}));}});
-    if(s.bricks.every(b=>!b.alive)){s.status="won";if(s.score>s.highScore){s.highScore=s.score;localStorage.setItem("gl_hs",s.score);}setDisplay(d=>({...d,status:"won",score:s.score,highScore:s.highScore}));}
+    if(s.ball.x<=BALL_R){s.ball.x=BALL_R;s.ball.vx=Math.abs(s.ball.vx);}
+    if(s.ball.x>=CW-BALL_R){s.ball.x=CW-BALL_R;s.ball.vx=-Math.abs(s.ball.vx);}
+    if(s.ball.y<=BALL_R){s.ball.y=BALL_R;s.ball.vy=Math.abs(s.ball.vy);}
+    if(s.ball.y+BALL_R>=PAD_Y&&s.ball.y-BALL_R<=PAD_Y+PAD_H&&s.ball.x>=s.padX-2&&s.ball.x<=s.padX+PAD_W+2&&s.ball.vy>0){
+      const hit=(s.ball.x-s.padX)/PAD_W; const angle=(hit-0.5)*2.2;
+      const spd=Math.min(Math.sqrt(s.ball.vx**2+s.ball.vy**2)+0.05,8);
+      s.ball.vx=spd*Math.sin(angle); s.ball.vy=-Math.abs(spd*Math.cos(angle));
+      if(now-s.lastHit>1000) s.combo=0;
+    }
+    if(s.ball.y>CH+BALL_R){
+      s.lives-=1; s.combo=0;
+      if(s.lives<=0){s.status="lost";if(s.score>s.highScore){s.highScore=s.score;localStorage.setItem("gl_hs2",s.score);}setDisplay(d=>({...d,status:"lost",lives:0,score:s.score,highScore:s.highScore}));return;}
+      s.ball={x:CW/2,y:PAD_Y-BALL_R-2,vx:3.2*(Math.random()>0.5?1:-1),vy:-4.2};
+      setDisplay(d=>({...d,lives:s.lives}));
+    }
+    s.bricks.forEach(b=>{
+      if(!b.alive) return;
+      const bx=BOX+b.c*(BW+BPAD), by=BOY+b.r*(BH+BPAD);
+      if(s.ball.x+BALL_R>bx&&s.ball.x-BALL_R<bx+BW&&s.ball.y+BALL_R>by&&s.ball.y-BALL_R<by+BH){
+        b.alive=false; s.combo++; const pts=b.pts*(s.combo>=3?2:1); s.score+=pts; s.lastHit=now;
+        s.particles.push(...makeParticles(bx+BW/2,by+BH/2,b.glow));
+        s.floaters.push({emoji:b.emoji,x:bx+BW/2,y:by+BH/2,vy:-2-Math.random(),life:1});
+        const oL=s.ball.x+BALL_R-bx,oR=bx+BW-(s.ball.x-BALL_R),oT=s.ball.y+BALL_R-by,oB=by+BH-(s.ball.y-BALL_R);
+        if(Math.min(oL,oR)<Math.min(oT,oB))s.ball.vx*=-1; else s.ball.vy*=-1;
+        setDisplay(d=>({...d,score:s.score,combo:s.combo,lastEmoji:b.emoji}));
+      }
+    });
+    s.particles=s.particles.filter(p=>p.life>0);
+    s.particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life-=0.04;});
+    s.floaters=s.floaters.filter(f=>f.life>0);
+    s.floaters.forEach(f=>{f.y+=f.vy;f.life-=0.025;});
+    if(s.bricks.every(b=>!b.alive)){s.status="won";if(s.score>s.highScore){s.highScore=s.score;localStorage.setItem("gl_hs2",s.score);}setDisplay(d=>({...d,status:"won",score:s.score,highScore:s.highScore}));}
   }, []);
 
-  const loop = useCallback(() => { update(); draw(); animRef.current=requestAnimationFrame(loop); }, [update,draw]);
-  const startGame = useCallback(() => { const s=stateRef.current; s.status="playing"; s.padX=CW/2-PAD_W/2; s.ball={x:CW/2,y:PAD_Y-BALL_R-1,vx:3,vy:-4}; s.bricks=makeBricks(); s.score=0; s.lives=3; setDisplay({status:"playing",score:0,lives:3,highScore:s.highScore}); if(animRef.current)cancelAnimationFrame(animRef.current); animRef.current=requestAnimationFrame(loop); }, [loop]);
+  const loop = useCallback(()=>{ update(); draw(); animRef.current=requestAnimationFrame(loop); },[update,draw]);
+  const startGame = useCallback(()=>{
+    const s=stateRef.current;
+    s.status="playing"; s.padX=CW/2-PAD_W/2;
+    s.ball={x:CW/2,y:PAD_Y-BALL_R-2,vx:3.2,vy:-4.2};
+    s.bricks=makeBricks(); s.particles=[]; s.floaters=[]; s.score=0; s.lives=3; s.combo=0;
+    setDisplay({status:"playing",score:0,lives:3,highScore:s.highScore,combo:0,lastEmoji:""});
+    if(animRef.current) cancelAnimationFrame(animRef.current);
+    animRef.current=requestAnimationFrame(loop);
+  },[loop]);
 
-  useEffect(() => {
+  useEffect(()=>{
     draw();
     const onKey=(e)=>{keysRef.current[e.key]=e.type==="keydown";};
     window.addEventListener("keydown",onKey); window.addEventListener("keyup",onKey);
-    return () => { window.removeEventListener("keydown",onKey); window.removeEventListener("keyup",onKey); if(animRef.current)cancelAnimationFrame(animRef.current); };
-  }, [draw]);
+    return()=>{window.removeEventListener("keydown",onKey);window.removeEventListener("keyup",onKey);if(animRef.current)cancelAnimationFrame(animRef.current);};
+  },[draw]);
 
-  const handlePointer = useCallback((e) => { const canvas=canvasRef.current; if(!canvas)return; const rect=canvas.getBoundingClientRect(); const cx=e.touches?e.touches[0].clientX:e.clientX; stateRef.current.padX=Math.max(0,Math.min(CW-PAD_W,(cx-rect.left)*(CW/rect.width)-PAD_W/2)); }, []);
+  const handlePointer=useCallback((e)=>{
+    const canvas=canvasRef.current; if(!canvas) return;
+    const rect=canvas.getBoundingClientRect();
+    const cx=e.touches?e.touches[0].clientX:e.clientX;
+    stateRef.current.padX=Math.max(0,Math.min(CW-PAD_W,(cx-rect.left)*(CW/rect.width)-PAD_W/2));
+  },[]);
+
+  const OVERLAY_DATA = {
+    idle:  { title:"🎭 Emoji Breaker", sub:"Her satırda farklı tema!\n💩 Kaka > 🦄 Unicorn > 🍕 Yemek > 👽 Uzay > 🐸 Hayvan\n3+ kombo = 2x puan!", btn:"🎮 Başlat" },
+    lost:  { title:"💀 Mahvoldun!", sub:`Son emoji: ${display.lastEmoji||"?"}\nDaha dikkatli ol! 😤`, btn:"🔄 Tekrar" },
+    won:   { title:"🏆 EFSANE!", sub:"Tüm emojileri patlattın!\nBir dahisin 🧠🔥", btn:"🔄 Yeniden" },
+  };
+  const od = OVERLAY_DATA[display.status];
 
   return (
     <div className="game-page">
       <div className="game-header" style={{width:"100%"}}>
-        <div className="game-title">brick<span>.</span></div>
+        <div className="game-title">emoji<span>.</span>break</div>
         <div className="game-scores">
           <div className="score-chip">Skor<span>{display.score}</span></div>
-          <div className="score-chip">En İyi<span>{display.highScore}</span></div>
+          <div className="score-chip">Rekor<span>{display.highScore}</span></div>
           <div className="score-chip">Can<div className="lives">{Array.from({length:3},(_,i)=><span key={i} className={`life ${i>=display.lives?"lost":""}`}>❤️</span>)}</div></div>
         </div>
       </div>
+      {display.status==="playing"&&display.combo>=2&&(
+        <div style={{textAlign:"center",fontSize:13,color:"#f0abfc",fontWeight:800,letterSpacing:1}}>
+          {display.lastEmoji} {display.combo}x KOMBO!
+        </div>
+      )}
       <div className="game-canvas-wrap">
         <canvas ref={canvasRef} width={CW} height={CH} onMouseMove={handlePointer} onTouchMove={handlePointer} style={{touchAction:"none"}}/>
-        {(display.status==="idle"||display.status==="lost"||display.status==="won")&&(
+        {od&&(
           <div className="game-overlay">
-            <div className="overlay-title">{display.status==="idle"&&"🧱 Brick"}{display.status==="lost"&&"💀 Oyun Bitti"}{display.status==="won"&&"🏆 Kazandın!"}</div>
-            {display.status!=="idle"&&<div className="overlay-score">Skor: {display.score}</div>}
-            <div className="overlay-sub">{display.status==="idle"&&"Klavyeyle veya aşağıdaki butonlarla oyna!"}{display.status==="lost"&&"Daha iyi şans bir dahaki sefere 😅"}{display.status==="won"&&"Tüm tuğlaları kırdın! 🔥"}</div>
-            <button className="game-start-btn" onClick={startGame}>{display.status==="idle"?"🎮 Oyunu Başlat":"🔄 Tekrar Oyna"}</button>
+            <div className="overlay-title">{od.title}</div>
+            <div className="overlay-sub" style={{whiteSpace:"pre-line"}}>{od.sub}</div>
+            {display.status!=="idle"&&<div className="overlay-score">Skor: {display.score} {display.score>=display.highScore&&display.score>0?"🏆 YENİ REKOR!":""}</div>}
+            <div style={{display:"flex",gap:8,flexDirection:"column",alignItems:"center",fontSize:13,color:"var(--muted)"}}>
+              <div>💩×50 🦄×40 🍕×30 👽×20 🐸×10</div>
+              <div style={{fontSize:11}}>3+ kombo = 2x puan!</div>
+            </div>
+            <button className="game-start-btn" onClick={startGame}>{od.btn}</button>
           </div>
         )}
       </div>
@@ -377,7 +490,10 @@ function GamePage() {
         <button className="ctrl-btn" onPointerDown={()=>keysRef.current["ArrowLeft"]=true} onPointerUp={()=>keysRef.current["ArrowLeft"]=false} onPointerLeave={()=>keysRef.current["ArrowLeft"]=false}>◀</button>
         <button className="ctrl-btn" onPointerDown={()=>keysRef.current["ArrowRight"]=true} onPointerUp={()=>keysRef.current["ArrowRight"]=false} onPointerLeave={()=>keysRef.current["ArrowRight"]=false}>▶</button>
       </div>
-      <div style={{fontSize:12,color:"var(--muted)",textAlign:"center"}}>🖥️ Klavye: ← → &nbsp;|&nbsp; 📱 Dokunarak veya ◀▶</div>
+      <div style={{fontSize:11,color:"var(--muted)",textAlign:"center",lineHeight:1.8}}>
+        🖥️ Klavye ← → &nbsp;|&nbsp; 📱 Dokunarak veya ◀▶<br/>
+        <span style={{fontSize:10}}>💩 en değerli, 🐸 en az — önce kakaları patlat!</span>
+      </div>
     </div>
   );
 }
