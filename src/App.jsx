@@ -1,5 +1,113 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
+// ── SES ENJİNİ (Web Audio API) ─────────────────────────────────────────────
+const AudioCtx = typeof window !== "undefined" ? (window.AudioContext || window.webkitAudioContext) : null;
+let _ctx = null;
+const getCtx = () => { if(!_ctx && AudioCtx) _ctx = new AudioCtx(); return _ctx; };
+
+const playTone = (freq, type, duration, volume=0.3, delay=0) => {
+  try {
+    const ctx = getCtx(); if(!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = type; osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+    gain.gain.setValueAtTime(volume, ctx.currentTime + delay);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + duration);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + duration);
+  } catch(e) {}
+};
+
+const playNoise = (duration, volume=0.15) => {
+  try {
+    const ctx = getCtx(); if(!ctx) return;
+    const bufSize = ctx.sampleRate * duration;
+    const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++) data[i] = Math.random()*2-1;
+    const src = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    src.buffer = buf; src.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(volume, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    src.start(); src.stop(ctx.currentTime + duration);
+  } catch(e) {}
+};
+
+const SFX = {
+  // Oyun sesleri
+  ballBounce: () => { playTone(440, "sine", 0.06, 0.15); },
+  wallBounce: () => { playTone(220, "square", 0.08, 0.1); },
+  brickHit: (pts) => {
+    const freq = pts===50?800:pts===40?650:pts===30?500:pts===20?380:280;
+    playTone(freq, "square", 0.08, 0.25);
+    playTone(freq*1.5, "sine", 0.12, 0.15, 0.05);
+  },
+  combo: (n) => {
+    for(let i=0;i<Math.min(n,5);i++) playTone(300+i*120,"sine",0.1,0.2,i*0.06);
+  },
+  lifeLost: () => {
+    playTone(300,"sawtooth",0.15,0.3);
+    playTone(200,"sawtooth",0.2,0.3,0.15);
+    playTone(120,"sawtooth",0.3,0.3,0.3);
+  },
+  gameOver: () => {
+    [400,350,300,200,150].forEach((f,i)=>playTone(f,"sawtooth",0.2,0.25,i*0.12));
+  },
+  gameWin: () => {
+    [523,659,784,1047].forEach((f,i)=>playTone(f,"sine",0.3,0.3,i*0.1));
+    setTimeout(()=>[1047,784,659,523,659,784,1047].forEach((f,i)=>playTone(f,"sine",0.2,0.2,i*0.08)),600);
+  },
+  gameStart: () => {
+    [262,330,392,523].forEach((f,i)=>playTone(f,"triangle",0.15,0.25,i*0.08));
+  },
+
+  // Sinek sesleri
+  flyHit: () => {
+    playNoise(0.08, 0.3);
+    playTone(80,"sawtooth",0.1,0.2,0.05);
+  },
+  flyMiss: () => {
+    playTone(200,"sine",0.05,0.1);
+    playTone(150,"sine",0.08,0.1,0.05);
+  },
+  flyBuzz: () => { playTone(180,"sawtooth",0.06,0.08); },
+
+  // UI sesleri
+  moodSelect: (idx) => {
+    const freqs=[523,587,659,698,784];
+    playTone(freqs[idx]||523,"sine",0.15,0.2);
+  },
+  taskDone: () => {
+    playTone(523,"sine",0.1,0.2);
+    playTone(659,"sine",0.1,0.2,0.1);
+  },
+  allDone: () => {
+    [523,659,784,1047,1319].forEach((f,i)=>playTone(f,"sine",0.2,0.25,i*0.08));
+  },
+  waterAdd: () => {
+    playTone(600,"sine",0.05,0.15);
+    playTone(800,"sine",0.08,0.1,0.06);
+  },
+  waterGoal: () => {
+    [400,500,600,800,1000].forEach((f,i)=>playTone(f,"sine",0.15,0.2,i*0.07));
+  },
+  ruletSpin: () => {
+    for(let i=0;i<8;i++) playTone(200+i*40,"square",0.05,0.1,i*0.05);
+  },
+  ruletResult: () => {
+    [300,400,500,400,600].forEach((f,i)=>playTone(f,"triangle",0.1,0.2,i*0.07));
+  },
+  musicDiscover: () => {
+    [330,415,494,659].forEach((f,i)=>playTone(f,"sine",0.15,0.2,i*0.07));
+  },
+  navClick: () => { playTone(440,"sine",0.04,0.08); },
+  addTask: () => { playTone(550,"triangle",0.08,0.15); },
+  removeTask: () => { playTone(300,"square",0.06,0.1); },
+};
+
+
 const API_KEY = import.meta.env.VITE_GROQ_API_KEY;
 const MODEL = "llama-3.3-70b-versatile";
 
@@ -15,11 +123,14 @@ const callAI = async (messages, system, maxTokens = 150) => {
 };
 
 const MOODS = [
-  { emoji: "🌟", label: "Harika", color: "#f5c842", bg: "#f5c84220" },
-  { emoji: "😊", label: "İyi", color: "#4ade80", bg: "#4ade8020" },
-  { emoji: "😐", label: "Eh işte", color: "#60a5fa", bg: "#60a5fa20" },
-  { emoji: "😔", label: "Kötü", color: "#f87171", bg: "#f8717120" },
-  { emoji: "🔥", label: "Enerjik", color: "#fb923c", bg: "#fb923c20" },
+  { emoji: "☀️", label: "Günaydın!", desc: "Yataktan fırladım", color: "#f5c842", bg: "#f5c84220" },
+  { emoji: "☕", label: "Kahve lazım", desc: "İnsan olmam için", color: "#fb923c", bg: "#fb923c20" },
+  { emoji: "🧟", label: "Zombiyim", desc: "Alarm düşmanım", color: "#a78bfa", bg: "#a78bfa20" },
+  { emoji: "😤", label: "Hırslıyım", desc: "Bugün her şey olur", color: "#4ade80", bg: "#4ade8020" },
+  { emoji: "🌧️", label: "Hüzünlüyüm", desc: "Yorganım özlüyor", color: "#60a5fa", bg: "#60a5fa20" },
+  { emoji: "🤯", label: "Kafam şişti", desc: "Ne yapacağım bilmem", color: "#f87171", bg: "#f8717120" },
+  { emoji: "😴", label: "Uyku hali", desc: "5 dakika daha...", color: "#94a3b8", bg: "#94a3b820" },
+  { emoji: "🔥", label: "Üstüme gelme", desc: "Bugün fırtına gibiyim", color: "#ef4444", bg: "#ef444420" },
 ];
 const CONFETTI_COLORS = ["#a78bfa","#f5c842","#4ade80","#f87171","#60a5fa","#fb923c"];
 const TODAY_KEY = new Date().toDateString();
@@ -61,15 +172,16 @@ body{background:var(--bg);color:var(--text);font-family:'Nunito',sans-serif;min-
 .nav-btn:hover{color:var(--text)}
 .nav-btn.active{background:#ffffff12;color:var(--text)}
 .nav-btn.water-active{background:#38bdf820;color:#38bdf8}
-.nav-btn.game-active{background:#f5c84220;color:#f5c842}
 .nav-btn.music-active{background:#f0abfc20;color:#f0abfc}
 .card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:20px}
 .card-label{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
-.mood-grid{display:flex;gap:8px;flex-wrap:wrap}
-.mood-btn{flex:1;min-width:70px;padding:10px 6px;border-radius:14px;border:1.5px solid var(--border);background:transparent;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;transition:all 0.2s;font-family:'Nunito',sans-serif}
+.mood-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.mood-btn{flex:1;min-width:80px;padding:10px 6px;border-radius:14px;border:1.5px solid var(--border);background:transparent;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:all 0.2s;font-family:'Nunito',sans-serif}
 .mood-btn:hover{transform:translateY(-2px)}
 .mood-emoji{font-size:22px}
 .mood-label{font-size:11px;font-weight:700;color:var(--muted)}
+.mood-desc{font-size:9px;color:var(--muted);text-align:center;line-height:1.3;opacity:0.7}
+.mood-btn.selected .mood-desc{opacity:1}
 .mood-btn.selected .mood-label{color:inherit}
 .ai-bubble{background:linear-gradient(135deg,#1e1e35,#1a1a2e);border:1px solid var(--border);border-radius:18px 18px 18px 4px;padding:14px 18px;font-size:14px;line-height:1.7;color:var(--text);min-height:52px}
 .ai-tag{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--accent);margin-bottom:6px;display:block}
@@ -147,28 +259,6 @@ body{background:var(--bg);color:var(--text);font-family:'Nunito',sans-serif;min-
 .splash{position:fixed;inset:0;pointer-events:none;z-index:50;overflow:hidden}
 .splash-drop{position:absolute;font-size:24px;animation:splashDrop 1s ease forwards}
 @keyframes splashDrop{0%{transform:translateY(0) scale(1);opacity:1}100%{transform:translateY(60px) scale(0);opacity:0}}
-
-/* GAME */
-.game-page{display:flex;flex-direction:column;gap:16px;animation:fadeIn 0.4s ease;align-items:center}
-.game-header{width:100%;display:flex;align-items:center;justify-content:space-between}
-.game-title{font-size:22px;font-weight:900;color:var(--text)}
-.game-title span{color:#f5c842}
-.game-scores{display:flex;gap:12px}
-.score-chip{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:6px 14px;font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:1px}
-.score-chip span{color:var(--text);font-size:16px;font-weight:700}
-.game-canvas-wrap{position:relative;border-radius:16px;overflow:hidden;border:2px solid var(--border);box-shadow:0 0 30px #00000060}
-canvas{display:block}
-.game-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0f0f1aee;gap:12px}
-.overlay-title{font-size:32px;font-weight:900;color:var(--text)}
-.overlay-sub{font-size:14px;color:var(--muted);text-align:center;line-height:1.6}
-.overlay-score{font-family:'Space Mono',monospace;font-size:18px;color:#f5c842}
-.game-start-btn{background:linear-gradient(135deg,#f5c842,#fb923c);border:none;border-radius:14px;padding:14px 32px;color:#000;font-family:'Nunito',sans-serif;font-weight:900;font-size:16px;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 20px #f5c84240}
-.game-start-btn:hover{transform:translateY(-2px)}
-.game-controls{display:flex;gap:10px;width:100%}
-.ctrl-btn{flex:1;padding:14px;background:var(--card);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:22px;cursor:pointer;transition:all 0.15s;font-family:'Nunito',sans-serif;font-weight:900;user-select:none}
-.ctrl-btn:active{background:#ffffff15;transform:scale(0.96)}
-.lives{display:flex;gap:4px}
-.life{font-size:14px}.life.lost{opacity:0.2}
 
 /* RULET */
 .rulet-page{display:flex;flex-direction:column;gap:16px;animation:fadeIn 0.4s ease}
@@ -257,11 +347,11 @@ function WaterPage() {
   const [goalShown, setGoalShown] = useState(false);
   useEffect(() => {
     try { localStorage.setItem("gl_water", JSON.stringify({ date:TODAY_KEY, glasses })); } catch {}
-    if (glasses >= WATER_GOAL && !goalShown) { setWConfetti(true); setGoalShown(true); setTimeout(() => setWConfetti(false), 4000); }
+    if (glasses >= WATER_GOAL && !goalShown) { SFX.waterGoal(); setWConfetti(true); setGoalShown(true); setTimeout(() => setWConfetti(false), 4000); }
   }, [glasses, goalShown]);
   const addGlass = () => {
     if (glasses >= WATER_GOAL) return;
-    setGlasses(g => g+1);
+    SFX.waterAdd(); setGlasses(g => g+1);
     const id = Date.now();
     setSplashes(p => [...p, { id, x:30+Math.random()*40 }]);
     setTimeout(() => setSplashes(p => p.filter(s => s.id!==id)), 1000);
@@ -294,205 +384,6 @@ function WaterPage() {
         <div className="water-progress-bar"><div className="water-progress-fill" style={{width:`${pct}%`}}/></div>
         <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:"#38bdf8",textAlign:"right"}}>{pct}%</div>
         <button className="water-undo" onClick={() => setGlasses(g => Math.max(0,g-1))} disabled={glasses===0}>↩ Son bardağı geri al</button>
-      </div>
-    </div>
-  );
-}
-
-// ── EMOJI BREAKER ──────────────────────────────────────────────────────────
-const CW=360,CH=500,PAD_W=72,PAD_H=12,PAD_Y=CH-32,BALL_R=9;
-const COLS=7,ROWS=5,BW=42,BH=36,BPAD=4;
-const BOX=(CW-(COLS*(BW+BPAD)-BPAD))/2,BOY=28;
-
-const ROW_THEMES = [
-  { emojis:["💩","🚽","🧻","💨","🪣","💩","🚽"],  pts:50,  bg:"#78350f", glow:"#f5c842" },
-  { emojis:["🦄","🌈","✨","🎀","💅","🦄","🌈"],  pts:40,  bg:"#701a75", glow:"#f0abfc" },
-  { emojis:["🍕","🍔","🌮","🍜","🧆","🍕","🍔"],  pts:30,  bg:"#7c2d12", glow:"#fb923c" },
-  { emojis:["👽","🛸","🚀","🌍","💫","👽","🛸"],  pts:20,  bg:"#0c4a6e", glow:"#38bdf8" },
-  { emojis:["🐸","🐧","🦊","🐳","🦖","🐸","🐧"], pts:10,  bg:"#14532d", glow:"#4ade80" },
-];
-
-const makeBricks = () => {
-  const b = [];
-  for (let r = 0; r < ROWS; r++) {
-    const theme = ROW_THEMES[r];
-    for (let c = 0; c < COLS; c++) {
-      b.push({ r, c, alive: true, emoji: theme.emojis[c % theme.emojis.length], pts: theme.pts, bg: theme.bg, glow: theme.glow });
-    }
-  }
-  return b;
-};
-
-const makeParticles = (x, y, glow) => Array.from({length:8},(_,i)=>({
-  x, y, vx: Math.cos(i/8*Math.PI*2)*3*(0.5+Math.random()), vy: Math.sin(i/8*Math.PI*2)*3*(0.5+Math.random()),
-  life:1, color: glow, size: 4+Math.random()*4
-}));
-
-function GamePage() {
-  const canvasRef = useRef(null);
-  const stateRef = useRef({
-    status:"idle", padX: CW/2-PAD_W/2,
-    ball: {x:CW/2, y:PAD_Y-BALL_R-2, vx:3.2, vy:-4.2},
-    bricks: makeBricks(), particles: [], floaters: [],
-    score:0, lives:3, highScore: parseInt(localStorage.getItem("gl_hs2")||"0"),
-    combo: 0, lastHit: 0,
-  });
-  const animRef = useRef(null);
-  const [display, setDisplay] = useState({status:"idle",score:0,lives:3,highScore:parseInt(localStorage.getItem("gl_hs2")||"0"),combo:0,lastEmoji:""});
-  const keysRef = useRef({});
-
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current; if(!canvas) return;
-    const ctx = canvas.getContext("2d"); const s = stateRef.current;
-    ctx.fillStyle="#0a0a14"; ctx.fillRect(0,0,CW,CH);
-    ctx.strokeStyle="#ffffff04"; ctx.lineWidth=1;
-    for(let x=0;x<CW;x+=24){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke();}
-    for(let y=0;y<CH;y+=24){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke();}
-    s.bricks.forEach(b=>{
-      if(!b.alive) return;
-      const x=BOX+b.c*(BW+BPAD), y=BOY+b.r*(BH+BPAD);
-      ctx.fillStyle=b.bg+"cc"; ctx.shadowColor=b.glow; ctx.shadowBlur=8;
-      ctx.beginPath(); ctx.roundRect(x,y,BW,BH,6); ctx.fill(); ctx.shadowBlur=0;
-      ctx.strokeStyle=b.glow+"60"; ctx.lineWidth=1.5;
-      ctx.beginPath(); ctx.roundRect(x,y,BW,BH,6); ctx.stroke();
-      ctx.font=`${BH*0.55}px serif`; ctx.textAlign="center"; ctx.textBaseline="middle";
-      ctx.shadowBlur=0; ctx.fillStyle="#fff";
-      ctx.fillText(b.emoji, x+BW/2, y+BH/2+1);
-    });
-    s.particles.forEach(p=>{
-      ctx.globalAlpha=p.life; ctx.fillStyle=p.color;
-      ctx.shadowColor=p.color; ctx.shadowBlur=6;
-      ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0;
-    });
-    ctx.globalAlpha=1;
-    s.floaters.forEach(f=>{
-      ctx.globalAlpha=f.life;
-      ctx.font=`${20*f.life+10}px serif`; ctx.textAlign="center";
-      ctx.fillText(f.emoji, f.x, f.y);
-    });
-    ctx.globalAlpha=1;
-    const pg=ctx.createLinearGradient(s.padX,0,s.padX+PAD_W,0);
-    pg.addColorStop(0,"#a78bfa"); pg.addColorStop(0.5,"#f0abfc"); pg.addColorStop(1,"#a78bfa");
-    ctx.fillStyle=pg; ctx.shadowColor="#c4b5fd"; ctx.shadowBlur=16;
-    ctx.beginPath(); ctx.roundRect(s.padX,PAD_Y,PAD_W,PAD_H,6); ctx.fill(); ctx.shadowBlur=0;
-    ctx.beginPath(); ctx.arc(s.ball.x,s.ball.y,BALL_R,0,Math.PI*2);
-    ctx.fillStyle="#fff"; ctx.shadowColor="#ffffff"; ctx.shadowBlur=18; ctx.fill(); ctx.shadowBlur=0;
-    if(s.combo>=3){
-      ctx.font=`bold ${14+s.combo*2}px Nunito,sans-serif`; ctx.textAlign="center";
-      ctx.fillStyle=`hsl(${s.combo*30},100%,70%)`; ctx.shadowColor=`hsl(${s.combo*30},100%,70%)`; ctx.shadowBlur=10;
-      ctx.fillText(`${s.combo}x KOMBO! 🔥`, CW/2, CH-10); ctx.shadowBlur=0;
-    }
-  }, []);
-
-  const update = useCallback(() => {
-    const s = stateRef.current; if(s.status!=="playing") return;
-    const now = Date.now();
-    if(keysRef.current["ArrowLeft"]||keysRef.current["a"]) s.padX=Math.max(0,s.padX-7);
-    if(keysRef.current["ArrowRight"]||keysRef.current["d"]) s.padX=Math.min(CW-PAD_W,s.padX+7);
-    s.ball.x+=s.ball.vx; s.ball.y+=s.ball.vy;
-    if(s.ball.x<=BALL_R){s.ball.x=BALL_R;s.ball.vx=Math.abs(s.ball.vx);}
-    if(s.ball.x>=CW-BALL_R){s.ball.x=CW-BALL_R;s.ball.vx=-Math.abs(s.ball.vx);}
-    if(s.ball.y<=BALL_R){s.ball.y=BALL_R;s.ball.vy=Math.abs(s.ball.vy);}
-    if(s.ball.y+BALL_R>=PAD_Y&&s.ball.y-BALL_R<=PAD_Y+PAD_H&&s.ball.x>=s.padX-2&&s.ball.x<=s.padX+PAD_W+2&&s.ball.vy>0){
-      const hit=(s.ball.x-s.padX)/PAD_W; const angle=(hit-0.5)*2.2;
-      const spd=Math.min(Math.sqrt(s.ball.vx**2+s.ball.vy**2)+0.05,8);
-      s.ball.vx=spd*Math.sin(angle); s.ball.vy=-Math.abs(spd*Math.cos(angle));
-      if(now-s.lastHit>1000) s.combo=0;
-    }
-    if(s.ball.y>CH+BALL_R){
-      s.lives-=1; s.combo=0;
-      if(s.lives<=0){s.status="lost";if(s.score>s.highScore){s.highScore=s.score;localStorage.setItem("gl_hs2",s.score);}setDisplay(d=>({...d,status:"lost",lives:0,score:s.score,highScore:s.highScore}));return;}
-      s.ball={x:CW/2,y:PAD_Y-BALL_R-2,vx:3.2*(Math.random()>0.5?1:-1),vy:-4.2};
-      setDisplay(d=>({...d,lives:s.lives}));
-    }
-    s.bricks.forEach(b=>{
-      if(!b.alive) return;
-      const bx=BOX+b.c*(BW+BPAD), by=BOY+b.r*(BH+BPAD);
-      if(s.ball.x+BALL_R>bx&&s.ball.x-BALL_R<bx+BW&&s.ball.y+BALL_R>by&&s.ball.y-BALL_R<by+BH){
-        b.alive=false; s.combo++; const pts=b.pts*(s.combo>=3?2:1); s.score+=pts; s.lastHit=now;
-        s.particles.push(...makeParticles(bx+BW/2,by+BH/2,b.glow));
-        s.floaters.push({emoji:b.emoji,x:bx+BW/2,y:by+BH/2,vy:-2-Math.random(),life:1});
-        const oL=s.ball.x+BALL_R-bx,oR=bx+BW-(s.ball.x-BALL_R),oT=s.ball.y+BALL_R-by,oB=by+BH-(s.ball.y-BALL_R);
-        if(Math.min(oL,oR)<Math.min(oT,oB))s.ball.vx*=-1; else s.ball.vy*=-1;
-        setDisplay(d=>({...d,score:s.score,combo:s.combo,lastEmoji:b.emoji}));
-      }
-    });
-    s.particles=s.particles.filter(p=>p.life>0);
-    s.particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life-=0.04;});
-    s.floaters=s.floaters.filter(f=>f.life>0);
-    s.floaters.forEach(f=>{f.y+=f.vy;f.life-=0.025;});
-    if(s.bricks.every(b=>!b.alive)){s.status="won";if(s.score>s.highScore){s.highScore=s.score;localStorage.setItem("gl_hs2",s.score);}setDisplay(d=>({...d,status:"won",score:s.score,highScore:s.highScore}));}
-  }, []);
-
-  const loop = useCallback(()=>{ update(); draw(); animRef.current=requestAnimationFrame(loop); },[update,draw]);
-  const startGame = useCallback(()=>{
-    const s=stateRef.current;
-    s.status="playing"; s.padX=CW/2-PAD_W/2;
-    s.ball={x:CW/2,y:PAD_Y-BALL_R-2,vx:3.2,vy:-4.2};
-    s.bricks=makeBricks(); s.particles=[]; s.floaters=[]; s.score=0; s.lives=3; s.combo=0;
-    setDisplay({status:"playing",score:0,lives:3,highScore:s.highScore,combo:0,lastEmoji:""});
-    if(animRef.current) cancelAnimationFrame(animRef.current);
-    animRef.current=requestAnimationFrame(loop);
-  },[loop]);
-
-  useEffect(()=>{
-    draw();
-    const onKey=(e)=>{keysRef.current[e.key]=e.type==="keydown";};
-    window.addEventListener("keydown",onKey); window.addEventListener("keyup",onKey);
-    return()=>{window.removeEventListener("keydown",onKey);window.removeEventListener("keyup",onKey);if(animRef.current)cancelAnimationFrame(animRef.current);};
-  },[draw]);
-
-  const handlePointer=useCallback((e)=>{
-    const canvas=canvasRef.current; if(!canvas) return;
-    const rect=canvas.getBoundingClientRect();
-    const cx=e.touches?e.touches[0].clientX:e.clientX;
-    stateRef.current.padX=Math.max(0,Math.min(CW-PAD_W,(cx-rect.left)*(CW/rect.width)-PAD_W/2));
-  },[]);
-
-  const OVERLAY_DATA = {
-    idle:  { title:"🎭 Emoji Breaker", sub:"Her satırda farklı tema!\n💩 Kaka > 🦄 Unicorn > 🍕 Yemek > 👽 Uzay > 🐸 Hayvan\n3+ kombo = 2x puan!", btn:"🎮 Başlat" },
-    lost:  { title:"💀 Mahvoldun!", sub:`Son emoji: ${display.lastEmoji||"?"}\nDaha dikkatli ol! 😤`, btn:"🔄 Tekrar" },
-    won:   { title:"🏆 EFSANE!", sub:"Tüm emojileri patlattın!\nBir dahisin 🧠🔥", btn:"🔄 Yeniden" },
-  };
-  const od = OVERLAY_DATA[display.status];
-
-  return (
-    <div className="game-page">
-      <div className="game-header" style={{width:"100%"}}>
-        <div className="game-title">emoji<span>.</span>break</div>
-        <div className="game-scores">
-          <div className="score-chip">Skor<span>{display.score}</span></div>
-          <div className="score-chip">Rekor<span>{display.highScore}</span></div>
-          <div className="score-chip">Can<div className="lives">{Array.from({length:3},(_,i)=><span key={i} className={`life ${i>=display.lives?"lost":""}`}>❤️</span>)}</div></div>
-        </div>
-      </div>
-      {display.status==="playing"&&display.combo>=2&&(
-        <div style={{textAlign:"center",fontSize:13,color:"#f0abfc",fontWeight:800,letterSpacing:1}}>
-          {display.lastEmoji} {display.combo}x KOMBO!
-        </div>
-      )}
-      <div className="game-canvas-wrap">
-        <canvas ref={canvasRef} width={CW} height={CH} onMouseMove={handlePointer} onTouchMove={handlePointer} style={{touchAction:"none"}}/>
-        {od&&(
-          <div className="game-overlay">
-            <div className="overlay-title">{od.title}</div>
-            <div className="overlay-sub" style={{whiteSpace:"pre-line"}}>{od.sub}</div>
-            {display.status!=="idle"&&<div className="overlay-score">Skor: {display.score} {display.score>=display.highScore&&display.score>0?"🏆 YENİ REKOR!":""}</div>}
-            <div style={{display:"flex",gap:8,flexDirection:"column",alignItems:"center",fontSize:13,color:"var(--muted)"}}>
-              <div>💩×50 🦄×40 🍕×30 👽×20 🐸×10</div>
-              <div style={{fontSize:11}}>3+ kombo = 2x puan!</div>
-            </div>
-            <button className="game-start-btn" onClick={startGame}>{od.btn}</button>
-          </div>
-        )}
-      </div>
-      <div className="game-controls">
-        <button className="ctrl-btn" onPointerDown={()=>keysRef.current["ArrowLeft"]=true} onPointerUp={()=>keysRef.current["ArrowLeft"]=false} onPointerLeave={()=>keysRef.current["ArrowLeft"]=false}>◀</button>
-        <button className="ctrl-btn" onPointerDown={()=>keysRef.current["ArrowRight"]=true} onPointerUp={()=>keysRef.current["ArrowRight"]=false} onPointerLeave={()=>keysRef.current["ArrowRight"]=false}>▶</button>
-      </div>
-      <div style={{fontSize:11,color:"var(--muted)",textAlign:"center",lineHeight:1.8}}>
-        🖥️ Klavye ← → &nbsp;|&nbsp; 📱 Dokunarak veya ◀▶<br/>
-        <span style={{fontSize:10}}>💩 en değerli, 🐸 en az — önce kakaları patlat!</span>
       </div>
     </div>
   );
@@ -588,7 +479,7 @@ function FlyPage() {
   const hitFly = (e, id, fx, fy) => {
     e.stopPropagation();
     const m = FLY_MSGS_HIT[Math.floor(Math.random()*FLY_MSGS_HIT.length)];
-    showMsg(m, fx, fy, true);
+    showMsg(m, fx, fy, true); SFX.flyHit();
     setFlies(prev=>prev.filter(f=>f.id!==id));
     setScore(s=>s+10);
     const sid = Date.now();
@@ -602,7 +493,7 @@ function FlyPage() {
     const px = ((e.clientX-rect.left)/rect.width)*100;
     const py = ((e.clientY-rect.top)/rect.height)*100;
     const m = FLY_MSGS_MISS[Math.floor(Math.random()*FLY_MSGS_MISS.length)];
-    showMsg(m, px, py, false);
+    showMsg(m, px, py, false); SFX.flyMiss();
     setMissed(m=>m+1);
   };
 
@@ -719,7 +610,7 @@ function RuletPage() {
 
   const spin = () => {
     if (spinning) return;
-    setSpinning(true);
+    SFX.ruletSpin(); setSpinning(true);
     setResults([]);
     setDone({});
     let i = 0;
@@ -729,7 +620,7 @@ function RuletPage() {
     }, 100);
     setTimeout(() => {
       clearInterval(interval);
-      setWheelEmoji("🎯");
+      setWheelEmoji("🎯"); SFX.ruletResult();
       const shuffled = [...RULET_HAVUZU].sort(() => Math.random() - 0.5);
       const picked = shuffled.slice(0, 3);
       setResults(picked);
@@ -783,75 +674,150 @@ function RuletPage() {
 }
 
 // ── MÜZİK KEŞİF ────────────────────────────────────────────────────────────
+const GENRE_CHIPS = [
+  {label:"🎲 Random",value:""},
+  {label:"🎸 Rock",value:"rock veya alternative"},
+  {label:"🎹 Electronic",value:"electronic veya synthwave"},
+  {label:"🎷 Jazz",value:"jazz veya soul"},
+  {label:"🎤 Hip-hop",value:"hip-hop veya R&B"},
+  {label:"🌍 Dünya",value:"world music veya Latin"},
+  {label:"🎻 Klasik",value:"klasik müzik"},
+  {label:"🌊 Ambient",value:"ambient veya chillout"},
+  {label:"🤘 Metal",value:"metal veya punk"},
+  {label:"🎵 Indie",value:"indie veya folk"},
+  {label:"💃 Pop",value:"pop veya disco"},
+  {label:"🎬 Sinema",value:"film müziği"},
+];
+
 function MusicPage() {
   const [loading, setLoading] = useState(false);
   const [song, setSong] = useState(null);
-  const [history, setHistory] = useState(() => { try { return JSON.parse(localStorage.getItem("gl_music_history") || "[]"); } catch { return []; } });
+  const [history, setHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("gl_music_history") || "[]"); } catch { return []; }
+  });
   const [playing, setPlaying] = useState(false);
+  const [selectedGenre, setSelectedGenre] = useState(GENRE_CHIPS[0]);
 
-  useEffect(() => { try { localStorage.setItem("gl_music_history", JSON.stringify(history.slice(0, 10))); } catch {} }, [history]);
+  useEffect(() => {
+    try { localStorage.setItem("gl_music_history", JSON.stringify(history.slice(0, 20))); } catch {}
+  }, [history]);
 
-  const discover = async () => {
-    setLoading(true);
-    setPlaying(false);
-    setSong(null);
+  const discover = async (chip) => {
+    const genre = chip || selectedGenre;
+    setLoading(true); setPlaying(false); setSong(null);
     const recentNames = history.slice(0, 5).map(h => h.name).join(", ");
+    const genreText = genre.value || "her türden rastgele";
     try {
-      const raw = await callAI([{
-        role: "user",
-        content: `Bana keşfedilmeyi bekleyen, az bilinen veya unutulmuş ama harika bir şarkı öner. ${recentNames ? `Son önerilenler (bunları tekrar önerme): ${recentNames}` : ""} Her türden olabilir — rock, jazz, elektronik, soul, dünya müziği, klasik, indie, her şey. JSON formatında yanıt ver, başka hiçbir şey yazma: {"name":"şarkı adı","artist":"sanatçı","year":"yıl","genre":"tür","emoji":"tek emoji","why":"neden dinlemeli (türkçe, 2 cümle)","vibe":"bu şarkıyı hangi anda dinlemeli (türkçe, 1 cümle)"}`
-      }], "Sen bir müzik uzmanısın. Sadece JSON formatında yanıt ver, başka hiçbir şey yazma.", 300);
-      const clean = raw.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      setSong(parsed);
-      setPlaying(true);
-      setHistory(h => [parsed, ...h.filter(x => x.name !== parsed.name)].slice(0, 10));
-    } catch {
-      setSong({ name: "Hata oluştu", artist: "Tekrar dene", year: "", genre: "", emoji: "😅", why: "Bir şeyler ters gitti.", vibe: "Tekrar butona bas!" });
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${import.meta.env.VITE_GROQ_API_KEY}` },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          max_tokens: 400,
+          messages: [
+            {
+              role: "system",
+              content: "You are a music expert. Always respond with ONLY a valid JSON object, no markdown, no explanation. Start with { and end with }."
+            },
+            {
+              role: "user",
+              content: `Recommend a lesser-known but great song in the genre: ${genreText}. ${recentNames ? "Do not recommend these again: " + recentNames + "." : ""} Respond ONLY with this JSON (all text fields in Turkish): {"name":"song title","artist":"artist name","year":"release year","genre":"genre","emoji":"one emoji","why":"why listen (turkish, 2 sentences)","vibe":"when to listen (turkish, 1 sentence)"}`
+            }
+          ]
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      const raw = data.choices?.[0]?.message?.content || "";
+      const first = raw.indexOf("{");
+      const last = raw.lastIndexOf("}");
+      if (first === -1 || last === -1) throw new Error("no json");
+      const parsed = JSON.parse(raw.slice(first, last + 1));
+      if (!parsed.name || !parsed.artist) throw new Error("missing fields");
+      SFX.musicDiscover();
+      setSong(parsed); setPlaying(true);
+      setHistory(h => [parsed, ...h.filter(x => x.name !== parsed.name)].slice(0, 20));
+    } catch(err) {
+      console.error("Music error:", err);
+      setSong({ name: "Bir hata oluştu", artist: "Tekrar dene 🔄", year: "", genre: genreText, emoji: "😅", why: "Groq API şu an yanıt vermedi.", vibe: "Butona tekrar bas!" });
     }
     setLoading(false);
   };
 
-  const spotifySearch = song ? `https://open.spotify.com/search/${encodeURIComponent(song.name + " " + song.artist)}` : "#";
-  const ytSearch = song ? `https://www.youtube.com/results?search_query=${encodeURIComponent(song.name + " " + song.artist)}` : "#";
+  const handleRandom = () => {
+    const r = GENRE_CHIPS[1 + Math.floor(Math.random() * (GENRE_CHIPS.length - 1))];
+    setSelectedGenre(r);
+    discover(r);
+  };
+
+  const spotifySearch = song ? `https://open.spotify.com/search/${encodeURIComponent((song.name||"") + " " + (song.artist||""))}` : "#";
+  const ytSearch = song ? `https://www.youtube.com/results?search_query=${encodeURIComponent((song.name||"") + " " + (song.artist||""))}` : "#";
 
   return (
     <div className="music-page">
+      {/* Genre chips */}
+      <div className="card">
+        <div className="card-label">Tür Seç</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+          {GENRE_CHIPS.map(g => (
+            <button key={g.label} onClick={()=>setSelectedGenre(g)}
+              style={{
+                padding:"7px 13px", borderRadius:20, border:"1.5px solid",
+                borderColor: selectedGenre.label===g.label ? "#f0abfc" : "var(--border)",
+                background: selectedGenre.label===g.label ? "#f0abfc20" : "transparent",
+                color: selectedGenre.label===g.label ? "#f0abfc" : "var(--muted)",
+                fontFamily:"Nunito,sans-serif", fontWeight:700, fontSize:12,
+                cursor:"pointer", transition:"all 0.15s",
+              }}>
+              {g.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Song card */}
       {song ? (
         <div className="music-hero">
-          <div className={`vinyl ${playing ? "spinning" : ""}`}>
+          <div className={`vinyl ${playing?"spinning":""}`}>
             <span style={{fontSize:36,zIndex:1}}>{song.emoji}</span>
             <div className="vinyl-center"/>
           </div>
           <div className="music-title">{song.name}</div>
           <div className="music-artist">{song.artist}</div>
           <div className="music-meta">
-            {song.year && <span className="music-tag">📅 {song.year}</span>}
-            {song.genre && <span className="music-tag">🎵 {song.genre}</span>}
+            {song.year&&<span className="music-tag">📅 {song.year}</span>}
+            {song.genre&&<span className="music-tag">🎵 {song.genre}</span>}
           </div>
           <div className="music-desc">{song.why}</div>
-          {song.vibe && <div className="music-vibe">"{song.vibe}"</div>}
+          {song.vibe&&<div className="music-vibe">"{song.vibe}"</div>}
         </div>
       ) : (
         <div className="card">
           <div className="music-empty">
             <div style={{fontSize:48,marginBottom:12}}>🎵</div>
             <div style={{fontSize:16,fontWeight:800,color:"var(--text)",marginBottom:8}}>Müzik Keşfet</div>
-            Butona bas, AI sana özel<br/>bir şarkı önersin!<br/>
-            <span style={{fontSize:11,color:"var(--muted)"}}>Her türden sürprizler seni bekliyor 🎲</span>
+            Tür seç ve keşfet butonuna bas,<br/>AI sana özel bir şarkı önersin!<br/>
+            <span style={{fontSize:11,color:"var(--muted)"}}>Sürprizler seni bekliyor 🎲</span>
           </div>
         </div>
       )}
 
-      <button className="music-discover-btn" onClick={discover} disabled={loading}>
-        <span style={{fontSize:22}}>{loading ? "🎵" : "✨"}</span>
-        {loading ? "Şarkı aranıyor..." : song ? "Başka şarkı öner!" : "Şarkı keşfet!"}
-      </button>
+      {/* Buttons */}
+      <div style={{display:"flex",gap:10}}>
+        <button className="music-discover-btn" onClick={()=>discover()} disabled={loading} style={{flex:1}}>
+          <span style={{fontSize:20}}>{loading?"⏳":"✨"}</span>
+          {loading ? "Aranıyor..." : song ? "Başka öner!" : "Keşfet!"}
+        </button>
+        <button onClick={handleRandom} disabled={loading} title="Tamamen random!"
+          style={{padding:"0 20px",borderRadius:16,border:"1.5px solid #f5c84240",background:"#f5c84215",color:"#f5c842",fontFamily:"Nunito,sans-serif",fontWeight:900,fontSize:22,cursor:"pointer",transition:"all 0.15s",flexShrink:0}}>
+          🎲
+        </button>
+      </div>
 
-      {song && (
+      {song&&(
         <div className="music-links">
-          <a className="music-link spotify" href={spotifySearch} target="_blank" rel="noreferrer">🎧 Spotify'da Aç</a>
-          <a className="music-link yt" href={ytSearch} target="_blank" rel="noreferrer">▶️ YouTube'da Aç</a>
+          <a className="music-link spotify" href={spotifySearch} target="_blank" rel="noreferrer">🎧 Spotify</a>
+          <a className="music-link yt" href={ytSearch} target="_blank" rel="noreferrer">▶️ YouTube</a>
         </div>
       )}
 
@@ -859,12 +825,12 @@ function MusicPage() {
         <div className="card">
           <div className="card-label">Geçmiş Öneriler</div>
           <div className="music-history">
-            {history.slice(1, 6).map((h, i) => (
+            {history.slice(1, 8).map((h, i) => (
               <div key={i} className="music-history-item">
                 <span className="music-history-emoji">{h.emoji}</span>
                 <div className="music-history-info">
                   <div className="music-history-name">{h.name}</div>
-                  <div className="music-history-artist">{h.artist} {h.year && `· ${h.year}`}</div>
+                  <div className="music-history-artist">{h.artist}{h.year&&` · ${h.year}`}{h.genre&&` · ${h.genre}`}</div>
                 </div>
               </div>
             ))}
@@ -874,6 +840,7 @@ function MusicPage() {
     </div>
   );
 }
+
 
 // ── MAIN APP ───────────────────────────────────────────────────────────────
 export default function App() {
@@ -904,23 +871,23 @@ export default function App() {
   useEffect(() => {
     const fd=dailyTasks.filter(t=>t.text.trim());
     if(fd.length>0&&fd.every(t=>t.done)&&(permanentTasks.length===0||permanentTasks.every(t=>permDone[t.id]))&&!confettiShown){
-      setShowConfetti(true); setConfettiShown(true); setTimeout(()=>setShowConfetti(false),4000);
+      SFX.allDone(); setShowConfetti(true); setConfettiShown(true); setTimeout(()=>setShowConfetti(false),4000);
     }
   }, [dailyTasks,permDone,permanentTasks,confettiShown]);
 
   const selectMood = async (m) => {
-    setMood(m); setAiLoading(true); setAiMsg("");
-    try { const text=await callAI([{role:"user",content:`Kullanıcı bugün "${m.label}" hissediyor. Kısa, samimi karşıla. Türkçe, 2-3 cümle.`}],"Sen günlük bir yaşam koçusun. Sıcak ve pozitif."); setAiMsg(text); }
+    SFX.moodSelect(MOODS.indexOf(m)); setMood(m); setAiLoading(true); setAiMsg("");
+    try { const text=await callAI([{role:"user",content:`Kullanıcı sabah "${m.label}" hissediyor (${m.desc}). Bu ruh haline uygun kısa, samimi ve biraz eğlenceli bir şekilde karşıla. Türkçe, 2-3 cümle.`}],"Sen günlük bir yaşam koçusun. Sıcak ve pozitif."); setAiMsg(text); }
     catch { setAiMsg("Bugün de harikasın! 💪"); }
     setAiLoading(false);
   };
 
-  const addPermanent=()=>{ if(!newPermInput.trim())return; setPermanentTasks(p=>[...p,{id:Date.now(),text:newPermInput.trim()}]); setNewPermInput(""); };
+  const addPermanent=()=>{ if(!newPermInput.trim())return; SFX.addTask(); setPermanentTasks(p=>[...p,{id:Date.now(),text:newPermInput.trim()}]); setNewPermInput(""); };
   const removePermanent=(id)=>{ setPermanentTasks(p=>p.filter(t=>t.id!==id)); setPermDone(p=>{const n={...p};delete n[id];return n;}); };
-  const togglePerm=(id)=>setPermDone(p=>({...p,[id]:!p[id]}));
+  const togglePerm=(id)=>{ SFX.taskDone(); setPermDone(p=>({...p,[id]:!p[id]})); };
   const updateDaily=(id,text)=>setDailyTasks(p=>p.map(t=>t.id===id?{...t,text}:t));
-  const toggleDaily=(id)=>setDailyTasks(p=>p.map(t=>t.id===id?{...t,done:!t.done}:t));
-  const addDailyTask=()=>{ if(!newDailyInput.trim())return; setDailyTasks(p=>[...p,{id:Date.now(),text:newDailyInput.trim(),done:false}]); setNewDailyInput(""); };
+  const toggleDaily=(id)=>{ SFX.taskDone(); setDailyTasks(p=>p.map(t=>t.id===id?{...t,done:!t.done}:t)); };
+  const addDailyTask=()=>{ if(!newDailyInput.trim())return; SFX.addTask(); setDailyTasks(p=>[...p,{id:Date.now(),text:newDailyInput.trim(),done:false}]); setNewDailyInput(""); };
   const removeDaily=(id)=>setDailyTasks(p=>p.filter(t=>t.id!==id));
   const resetDaily=()=>{ setDailyTasks([{id:1,text:"",done:false},{id:2,text:"",done:false},{id:3,text:"",done:false}]); setConfettiShown(false); };
 
@@ -943,12 +910,11 @@ export default function App() {
         </div>
 
         <div className="nav">
-          <button className={`nav-btn ${page==="home"?"active":""}`} onClick={()=>setPage("home")}>✅ Görev</button>
-          <button className={`nav-btn ${page==="water"?"water-active":""}`} onClick={()=>setPage("water")}>💧 Su</button>
-          <button className={`nav-btn ${page==="rulet"?"active":""}`} onClick={()=>setPage("rulet")}>🎰 Rulet</button>
-          <button className={`nav-btn ${page==="music"?"music-active":""}`} onClick={()=>setPage("music")}>🎵 Müzik</button>
-          <button className={`nav-btn ${page==="game"?"game-active":""}`} onClick={()=>setPage("game")}>🎮 Oyun</button>
-          <button className={`nav-btn ${page==="fly"?"active":""}`} onClick={()=>setPage("fly")} style={page==="fly"?{background:"#4ade8020",color:"#4ade80"}:{}}>🪰 Sinek</button>
+          <button className={`nav-btn ${page==="home"?"active":""}`} onClick={()=>{ SFX.navClick(); setPage("home"); }}>✅ Görev</button>
+          <button className={`nav-btn ${page==="water"?"water-active":""}`} onClick={()=>{ SFX.navClick(); setPage("water"); }}>💧 Su</button>
+          <button className={`nav-btn ${page==="rulet"?"active":""}`} onClick={()=>{ SFX.navClick(); setPage("rulet"); }}>🎰 Rulet</button>
+          <button className={`nav-btn ${page==="music"?"music-active":""}`} onClick={()=>{ SFX.navClick(); setPage("music"); }}>🎵 Müzik</button>
+          <button className={`nav-btn ${page==="fly"?"active":""}`} onClick={()=>{ SFX.navClick(); setPage("fly"); }} style={page==="fly"?{background:"#4ade8020",color:"#4ade80"}:{}}>🪰 Sinek</button>
         </div>
 
         {page==="home" && (
@@ -962,6 +928,7 @@ export default function App() {
                     onClick={()=>selectMood(m)}>
                     <span className="mood-emoji">{m.emoji}</span>
                     <span className="mood-label">{m.label}</span>
+                    <span className="mood-desc">{m.desc}</span>
                   </button>
                 ))}
               </div>
@@ -996,7 +963,7 @@ export default function App() {
         {page==="water"&&<WaterPage/>}
         {page==="rulet"&&<RuletPage/>}
         {page==="music"&&<MusicPage/>}
-        {page==="game"&&<GamePage/>}
+        
         {page==="fly"&&<FlyPage/>}
       </div>
     </>
